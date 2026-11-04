@@ -21,6 +21,8 @@
     --jar-edge: #b5e0bd;
     --accent: #ff7a59;
     --accent-dark: #d9573a;
+    --accent2: #4fb36b;
+    --accent2-dark: #3a8f52;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
@@ -83,6 +85,23 @@
   .evo img.on { filter: none; opacity: 1; }
   .evo img.top { transform: translateY(-3px) scale(1.15); }
 
+  /* 하단 버튼 */
+  .actions { display: flex; gap: 8px; margin-bottom: 4px; }
+  .action-btn {
+    flex: 1; height: 48px; font-family: inherit; font-size: 18px; color: #fff; cursor: pointer;
+    background: var(--accent); border: none; border-radius: 16px;
+    box-shadow: 0 4px 0 var(--accent-dark);
+  }
+  .action-btn.swap { background: var(--accent2); box-shadow: 0 4px 0 var(--accent2-dark); }
+  .action-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+  .action-btn:disabled { opacity: .45; cursor: default; }
+  #jar.shaking { animation: jarShake .45s ease-in-out; }
+  @keyframes jarShake {
+    15%, 55% { transform: translateX(-6px) rotate(-1deg); }
+    35%, 75% { transform: translateX(6px) rotate(1deg); }
+  }
+  #nextImg.swapped { animation: bump .25s ease-out; }
+
   /* 오버레이 */
   .overlay {
     position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
@@ -127,6 +146,11 @@
   </div>
 
   <div class="card evo" id="evo"></div>
+
+  <div class="actions">
+    <button class="action-btn" id="shakeBtn">흔들기 <span id="shakeCount"></span></button>
+    <button class="action-btn swap" id="swapBtn">바꾸기 <span id="swapCount"></span></button>
+  </div>
 </div>
 
 <div class="overlay" id="startScreen">
@@ -149,7 +173,7 @@
 </div>
 
 <script>
-const { Engine, Bodies, Body, Composite, Events } = Matter;
+const { Engine, Bodies, Body, Composite, Events, Vertices } = Matter;
 
 // ===== 설정 =====
 const W = 400;                   // 게임 월드 너비 (화면에 맞춰 확대/축소)
@@ -161,29 +185,42 @@ const DANGER_LIMIT = 2500;       // 선 위에 머물 수 있는 시간(ms)
 const COMBO_WINDOW = 1100;       // 이 시간 안에 다음 합체가 일어나면 콤보
 const ASSET = '수박게임에셋_충남대평생교육/수박게임에셋_충남대평생교육/';
 
-// body: 이미지 안에서 과일 몸통 원의 [중심x, 중심y, 반지름] (픽셀)
+// w: 게임 안에서의 너비, px: 원본 이미지 너비
+// hull: 꼭지와 잎까지 감싸는 충돌 윤곽 [x1,y1, x2,y2, ...] (이미지 픽셀, 알파값에서 추출)
 const FRUITS = [
-  { name: '체리',     file: '01_cherry.png',     r: 15,  color: '#e5323b', body: [80, 150, 80] },
-  { name: '딸기',     file: '02_strawberry.png', r: 21,  color: '#f2464f', body: [111, 142, 108] },
-  { name: '블루베리', file: '03_blueberry.png',  r: 27,  color: '#4a5fe0', body: [105, 112, 105] },
-  { name: '포도',     file: '04_grape.png',      r: 33,  color: '#9a4fd6', body: [125, 170, 122] },
-  { name: '오렌지',   file: '05_orange.png',     r: 40,  color: '#ff9a1f', body: [138, 151, 138] },
-  { name: '레몬',     file: '06_lemon.png',      r: 48,  color: '#f7d531', body: [147, 152, 124] },
-  { name: '복숭아',   file: '07_peach.png',      r: 57,  color: '#ffaaa5', body: [155, 160, 153] },
-  { name: '사과',     file: '08_apple.png',      r: 66,  color: '#e8262c', body: [149, 176, 150] },
-  { name: '파인애플', file: '09_pineapple.png',  r: 76,  color: '#f5c518', body: [144, 302, 148] },
-  { name: '멜론',     file: '10_melon.png',      r: 87,  color: '#a6d86b', body: [171, 207, 171] },
-  { name: '수박',     file: '11_watermelon.png', r: 100, color: '#3fa535', body: [227, 239, 227] },
+  { name: '체리',     file: '01_cherry.png',     w: 33,  px: 175, color: '#e5323b', hull: [0,147,14,112,100,18,119,4,136,0,172,0,175,14,160,164,148,196,134,211,100,227,74,229,44,222,28,213,6,186,0,164] },
+  { name: '딸기',     file: '02_strawberry.png', w: 43,  px: 222, color: '#f2464f', hull: [0,107,17,67,53,27,116,2,135,3,185,32,196,44,216,89,222,128,208,171,183,206,137,244,97,253,73,244,37,211,8,161] },
+  { name: '블루베리', file: '03_blueberry.png',  w: 54,  px: 210, color: '#4a5fe0', hull: [3,90,19,59,60,11,99,0,142,9,190,59,207,92,210,133,191,178,157,206,135,214,100,217,71,213,38,197,21,181,0,134] },
+  { name: '포도',     file: '04_grape.png',      w: 68,  px: 251, color: '#9a4fd6', hull: [6,98,54,29,147,0,163,3,217,41,234,69,250,135,249,159,206,227,150,288,117,297,101,292,85,278,36,223,27,207,0,125] },
+  { name: '오렌지',   file: '05_orange.png',     w: 80,  px: 276, color: '#ff9a1f', hull: [13,109,40,74,92,25,164,2,235,10,271,126,276,177,267,212,235,255,200,277,152,289,96,285,59,270,28,244,11,217,0,174] },
+  { name: '레몬',     file: '06_lemon.png',      w: 100, px: 294, color: '#f7d531', hull: [3,158,30,104,59,69,137,8,185,0,221,4,262,40,293,130,291,157,263,205,236,236,209,253,171,265,133,267,73,251,6,191] },
+  { name: '복숭아',   file: '07_peach.png',      w: 114, px: 310, color: '#ffaaa5', hull: [0,160,23,88,71,42,152,0,245,1,299,26,310,160,309,193,292,244,247,292,213,308,172,312,79,300,37,270,18,244,2,199] },
+  { name: '사과',     file: '08_apple.png',      w: 132, px: 299, color: '#e8262c', hull: [8,120,34,78,118,13,205,0,257,10,295,135,299,187,286,241,271,269,242,303,195,327,98,326,58,305,33,277,13,240,0,187] },
+  { name: '파인애플', file: '09_pineapple.png',  w: 148, px: 288, color: '#f5c518', hull: [0,293,13,95,45,36,145,0,244,33,278,95,288,284,280,361,264,396,242,421,209,441,140,452,89,445,58,431,21,393,5,353] },
+  { name: '멜론',     file: '10_melon.png',      w: 174, px: 343, color: '#a6d86b', hull: [6,166,30,115,108,5,117,0,242,6,317,120,343,200,339,255,307,319,263,356,220,373,163,378,99,365,40,324,10,275,0,231] },
+  { name: '수박',     file: '11_watermelon.png', w: 200, px: 454, color: '#3fa535', hull: [28,147,85,80,174,7,202,1,327,50,409,113,443,176,454,269,440,331,376,417,327,446,239,465,148,455,55,400,12,331,0,262] },
 ];
 const MERGE_SCORE = [0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55]; // 만들어진 과일 단계별 점수
 const WATERMELON_BONUS = 100;                                 // 수박 두 개가 합쳐지면 사라지며 보너스
 const SPAWN_WEIGHTS = [30, 25, 20, 15, 10];                   // 떨어지는 과일: 체리~오렌지
+const MAX_SHAKES = 3, MAX_SWAPS = 3;                          // 한 판에 쓸 수 있는 흔들기/바꾸기 횟수
 
 FRUITS.forEach(f => {
   f.img = new Image();
   f.ok = false;
   f.img.onload = () => { f.ok = true; };
   f.img.src = ASSET + f.file;
+
+  // 윤곽을 게임 크기로 변환하고, 물리 중심(cx, cy)과 중심에서 가장자리까지 거리를 구함
+  f.k = f.w / f.px;
+  f.verts = [];
+  for (let i = 0; i < f.hull.length; i += 2) f.verts.push({ x: f.hull[i] * f.k, y: f.hull[i + 1] * f.k });
+  const c = Vertices.centre(f.verts);
+  const xs = f.verts.map(p => p.x), ys = f.verts.map(p => p.y);
+  f.cx = c.x;
+  f.cy = c.y;
+  f.halfW = Math.max(c.x - Math.min(...xs), Math.max(...xs) - c.x);
+  f.halfH = Math.max(...ys) - c.y;
 });
 
 // ===== 저장 (실패해도 게임은 동작) =====
@@ -247,6 +284,8 @@ function tone(freq, dur, type = 'sine', vol = 0.18, slide = 0.5, delay = 0) {
 }
 const sfx = {
   drop: () => tone(240, 0.09, 'sine', 0.08, 0.6),
+  shake: () => [0, 0.12, 0.24].forEach(d => tone(130, 0.1, 'triangle', 0.16, 0.7, d)),
+  swap: () => { tone(520, 0.08, 'triangle', 0.1, 1.2); tone(700, 0.08, 'triangle', 0.1, 1.2, 0.07); },
   pop: lv => { const f = 900 - lv * 55; tone(f, 0.18, 'sine', 0.2, 0.55); tone(f * 1.5, 0.08, 'triangle', 0.05, 1); },
   combo: n => tone(500 + n * 90, 0.12, 'triangle', 0.08, 1.3, 0.05),
   big: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.14, 1, i * 0.09)),
@@ -258,7 +297,7 @@ function vibrate(ms) { if (navigator.vibrate && !muted) navigator.vibrate(ms); }
 let engine, fruits, mergeQueue, parts, texts;
 let state = 'ready', score, best = Number(load('best')) || 0;
 let current, next, aimX = W / 2, holding = false, canDrop, cooldownEnd;
-let gameTime, combo, lastMerge, maxLevel, dangerTime, dropped;
+let gameTime, combo, lastMerge, maxLevel, dangerTime, dropped, shakesLeft, swapsLeft;
 
 function randSpawn() {
   const total = SPAWN_WEIGHTS.reduce((a, b) => a + b, 0);
@@ -290,11 +329,13 @@ function reset() {
   maxLevel = 0; dangerTime = 0; dropped = false;
   current = randSpawn(); next = randSpawn();
   canDrop = true; cooldownEnd = 0; holding = false;
-  updateScore(); updateNext(); updateEvo();
+  shakesLeft = MAX_SHAKES; swapsLeft = MAX_SWAPS;
+  updateScore(); updateNext(); updateEvo(); updateItems();
 }
 
 function makeFruit(level, x, y) {
-  const b = Bodies.circle(x, y, FRUITS[level].r, {
+  const verts = FRUITS[level].verts.map(p => ({ x: p.x, y: p.y }));
+  const b = Bodies.fromVertices(x, y, [verts], {
     restitution: 0.12, friction: 0.35, frictionStatic: 0.5, frictionAir: 0.012, density: 0.0015,
   });
   b.level = level;
@@ -342,7 +383,7 @@ function processMerges() {
       continue;
     }
 
-    const nl = lv + 1, r = FRUITS[nl].r;
+    const nl = lv + 1, r = FRUITS[nl].halfW;
     const nb = makeFruit(nl, clamp(x, r, W - r), y);
     Body.setVelocity(nb, { x: vx, y: Math.min(0, vy) - 1.2 });
 
@@ -366,7 +407,7 @@ function checkDanger() {
   let over = false, near = false;
   for (const b of fruits) {
     if (b.merging || gameTime - b.born < 1200) continue; // 방금 떨어뜨린/합쳐진 과일은 잠깐 봐줌
-    const top = b.position.y - FRUITS[b.level].r;
+    const top = b.bounds.min.y;
     if (top < DANGER_Y) over = true;
     else if (top < DANGER_Y + 50) near = true;
   }
@@ -378,7 +419,7 @@ let dangerLevel = 0;
 
 function drop() {
   if (!canDrop || state !== 'playing') return;
-  const r = FRUITS[current].r;
+  const r = FRUITS[current].halfW;
   const x = clamp(aimX, r + 1, W - r - 1) + (Math.random() - 0.5) * 0.4; // 완벽한 수직 쌓기 방지
   makeFruit(current, x, DROP_Y);
   maxLevel = Math.max(maxLevel, current);
@@ -389,6 +430,35 @@ function drop() {
   dropped = true;
   sfx.drop();
   updateNext(); updateEvo();
+}
+
+// 흔들기: 통을 흔들어 과일들을 튕겨 올림
+function shake() {
+  if (state !== 'playing' || shakesLeft <= 0 || fruits.length === 0) return;
+  shakesLeft--;
+  for (const b of fruits) {
+    Body.setVelocity(b, {
+      x: b.velocity.x + (Math.random() - 0.5) * 10,
+      y: b.velocity.y - (3 + Math.random() * 5),
+    });
+    Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.2);
+  }
+  const jar = $('jar');
+  jar.classList.remove('shaking'); void jar.offsetWidth; jar.classList.add('shaking');
+  sfx.shake(); vibrate(120);
+  updateItems();
+}
+
+// 바꾸기: 지금 과일과 다음 과일의 순서를 맞바꿈
+function swap() {
+  if (state !== 'playing' || swapsLeft <= 0) return;
+  if (current === next) { toast('다음 과일과 같아요'); return; }
+  swapsLeft--;
+  [current, next] = [next, current];
+  updateNext();
+  nextImg.classList.remove('swapped'); void nextImg.offsetWidth; nextImg.classList.add('swapped');
+  sfx.swap(); vibrate(15);
+  updateItems();
 }
 
 function gameOver() {
@@ -422,6 +492,12 @@ function updateEvo() {
     img.classList.toggle('on', i <= maxLevel);
     img.classList.toggle('top', i === maxLevel);
   });
+}
+function updateItems() {
+  $('shakeCount').textContent = shakesLeft;
+  $('swapCount').textContent = swapsLeft;
+  $('shakeBtn').disabled = shakesLeft <= 0;
+  $('swapBtn').disabled = swapsLeft <= 0;
 }
 let toastTimer;
 function toast(msg) {
@@ -460,12 +536,11 @@ function drawFruit(lv, x, y, angle, s) {
   ctx.translate(x, y);
   ctx.rotate(angle);
   if (f.ok) {
-    const [cx, cy, br] = f.body;
-    const k = (f.r / br) * s;
-    ctx.drawImage(f.img, -cx * k, -cy * k, f.img.naturalWidth * k, f.img.naturalHeight * k);
+    const k = f.k * s;
+    ctx.drawImage(f.img, -f.cx * s, -f.cy * s, f.img.naturalWidth * k, f.img.naturalHeight * k);
   } else {
     ctx.fillStyle = f.color;
-    ctx.beginPath(); ctx.arc(0, 0, f.r * s, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, f.halfW * s, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
@@ -499,12 +574,12 @@ function draw() {
 
   // 조준선 + 들고 있는 과일
   if (state === 'playing' && canDrop) {
-    const r = FRUITS[current].r, x = clamp(aimX, r + 1, W - r - 1);
+    const r = FRUITS[current].halfW, x = clamp(aimX, r + 1, W - r - 1);
     ctx.save();
     ctx.setLineDash([4, 8]);
     ctx.lineWidth = 2;
     ctx.strokeStyle = holding ? 'rgba(255,122,89,.8)' : 'rgba(90,58,42,.2)';
-    ctx.beginPath(); ctx.moveTo(x, DROP_Y + r); ctx.lineTo(x, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, DROP_Y + FRUITS[current].halfH); ctx.lineTo(x, H); ctx.stroke();
     ctx.restore();
     drawFruit(current, x, DROP_Y, 0, 1);
   }
@@ -591,6 +666,8 @@ $('soundBtn').addEventListener('click', () => {
   updateSoundBtn();
   initAudio();
 });
+$('shakeBtn').addEventListener('click', () => { initAudio(); shake(); });
+$('swapBtn').addEventListener('click', () => { initAudio(); swap(); });
 function start() {
   initAudio();
   reset();
